@@ -1,0 +1,25 @@
+Model,Input Data,Block,Feature Extraction Latency (ms/window) (bs=1),Representation Latency Source,Classifier Latency (ms/window) (bs=1),Classifier Throughput (windows/s) (bs=1),End To End Latency (ms/window) (bs=1),End To End Throughput (windows/s) (bs=1)
+knn,opensmile,features,28.286,live,166.702,5.999,194.988,5.129
+mlp,opensmile,features,28.286,live,0.6492,1540.454,28.9352,34.56
+rf,opensmile,features,28.286,live,3.1932,313.162,31.4792,31.767
+svm,opensmile,features,28.286,live,12.654,79.026,40.94,24.426
+knn,vggish,features,1.9701,live,0.891,1122.334,2.8611,349.516
+mlp,vggish,features,1.9701,live,0.2166,4617.291,2.1867,457.315
+rf,vggish,features,1.9701,live,2.9772,335.881,4.9473,202.129
+svm,vggish,features,1.9701,live,0.3423,2921.34,2.3124,432.45
+knn,whisper,features,6.4962,live,3.5216,283.959,10.0178,99.822
+mlp,whisper,features,6.4962,live,0.2031,4922.896,6.6993,149.269
+rf,whisper,features,6.4962,live,3.1013,322.446,9.5975,104.194
+svm,whisper,features,6.4962,live,0.7967,1255.136,7.2929,137.119
+knn,laion-clap,features,5.1895,live,4.0356,247.796,9.2251,108.4
+mlp,laion-clap,features,5.1895,live,0.2128,4698.622,5.4023,185.105
+rf,laion-clap,features,5.1895,live,2.9676,336.971,8.1571,122.592
+svm,laion-clap,features,5.1895,live,0.7444,1343.343,5.9339,168.523
+knn,ms-clap,features,3.6345,live,9.2606,107.985,12.8951,77.549
+mlp,ms-clap,features,3.6345,live,0.7506,1332.198,4.3851,228.043
+rf,ms-clap,features,3.6345,live,3.2147,311.071,6.8492,146.002
+svm,ms-clap,features,3.6345,live,1.4817,674.893,5.1162,195.457
+knn,mfcc,features,6.0819,live,0.5428,1842.469,6.6247,150.951
+mlp,mfcc,features,6.0819,live,0.18,5555.97,6.2619,159.696
+rf,mfcc,features,6.0819,live,3.0177,331.379,9.0996,109.895
+svm,mfcc,features,6.0819,live,0.2583,3871.361,6.3402,157.724

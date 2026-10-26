@@ -34,6 +34,17 @@ class DatasetConfig:
     frame_duration: float = 3.0
     overlap: float = 0.25
 
+    # Raw-audio framing options (defaults preserve the original behaviour).
+    # "shift": slide the final partial window back to the end of the audio
+    #   (original behaviour). "pad": emit the trailing partial window as an
+    #   extra zero-padded frame, matching the embedding-extraction repo.
+    tail_window_mode: str = "shift"
+    short_audio_handling: str = "pad"
+    enable_silence_trimming: bool = False
+    silence_threshold_db: float = -40.0
+    silence_min_duration_ms: float = 250.0
+    normalization_mode: str = "none"
+
     image_dir: Optional[str] = None
     image_size: Tuple[int, int] = (224, 224)
 

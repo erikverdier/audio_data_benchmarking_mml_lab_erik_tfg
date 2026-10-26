@@ -85,10 +85,22 @@ class WhisperDataset(Dataset):
         sample_rate: int = 16000,
         frame_duration: float = 3.0,
         overlap: float = 0.25,
+        enable_silence_trimming: bool = False,
+        silence_threshold_db: float = -40.0,
+        silence_min_duration_ms: float = 250.0,
+        normalization_mode: str = "none",
+        short_audio_handling: str = "pad",
+        tail_window_mode: str = "shift",
     ):
         self.sample_rate = sample_rate
         self.frame_duration = frame_duration
         self.overlap = overlap
+        self.enable_silence_trimming = enable_silence_trimming
+        self.silence_threshold_db = silence_threshold_db
+        self.silence_min_duration_ms = silence_min_duration_ms
+        self.normalization_mode = normalization_mode
+        self.short_audio_handling = short_audio_handling
+        self.tail_window_mode = tail_window_mode
 
         from transformers import WhisperFeatureExtractor
         self.feature_extractor = WhisperFeatureExtractor.from_pretrained(model_name)
@@ -98,17 +110,23 @@ class WhisperDataset(Dataset):
             self._items.extend(self._windows_for_file(filepath, label))
 
     def _windows_for_file(self, filepath: str, label: int) -> List[tuple]:
-        import librosa
+        from scripts.data.raw_audio import load_and_frame_audio
 
-        audio, _ = librosa.load(filepath, sr=self.sample_rate, mono=True)
-        audio = np.asarray(audio, dtype=np.float32)
-
-        frame_len = int(self.sample_rate * self.frame_duration)
-        hop_len = max(1, int(frame_len * (1 - self.overlap)))
-        windows = _make_windows(audio, frame_len, hop_len)
+        frames = load_and_frame_audio(
+            filepath,
+            sample_rate=self.sample_rate,
+            frame_duration=self.frame_duration,
+            overlap=self.overlap,
+            enable_silence_trimming=self.enable_silence_trimming,
+            silence_threshold_db=self.silence_threshold_db,
+            silence_min_duration_ms=self.silence_min_duration_ms,
+            normalization_mode=self.normalization_mode,
+            short_audio_handling=self.short_audio_handling,
+            tail_window_mode=self.tail_window_mode,
+        )
 
         items = []
-        for window in windows:
+        for window, _padded in frames:
             inputs = self.feature_extractor(
                 window,
                 sampling_rate=self.sample_rate,
@@ -168,6 +186,31 @@ def validate(model, dataloader, device):
     )
 
 
+def _measure_latency_whisper(model, val_dataset, device, params) -> Dict[str, float]:
+    """Times encoder, classifier, and end-to-end forward at batch 1 and the
+    training batch size, returning per-window latency columns."""
+    import torch
+    from scripts.evaluation.latency import measure_whisper_components, to_latency_columns
+
+    n = len(val_dataset)
+    if n == 0:
+        return {}
+
+    batch_sizes = []
+    for bs in (1, params.get("batch_size", 1)):
+        if bs and bs not in batch_sizes:
+            batch_sizes.append(int(bs))
+
+    columns: Dict[str, float] = {}
+    for bs in batch_sizes:
+        k = min(bs, n)
+        feats = torch.stack([val_dataset[i][0] for i in range(k)]).to(device)
+        stats = measure_whisper_components(model, feats, device)
+        for key, value in to_latency_columns(stats, k).items():
+            columns[f"{key} (bs={bs})"] = value
+    return columns
+
+
 def run(
     dataset_config: DatasetConfig,
     bench_config: BenchmarkConfig,
@@ -207,25 +250,42 @@ def run(
     train_df = train_df[train_df["label"].isin(classes)]
     val_df = val_df[val_df["label"].isin(classes)]
 
-    train_dataset = WhisperDataset(
-        filepaths=train_df["filepath"].tolist(),
-        labels=[class_to_idx[l] for l in train_df["label"]],
+    early_stopping = params.get("early_stopping", True)
+    window_kwargs = dict(
         n_classes=len(classes),
         model_name=params["model_name"],
         sample_rate=params["sample_rate"],
         frame_duration=params["frame_duration"],
         overlap=params["overlap"],
+        enable_silence_trimming=getattr(dataset_config, "enable_silence_trimming", False),
+        silence_threshold_db=getattr(dataset_config, "silence_threshold_db", -40.0),
+        silence_min_duration_ms=getattr(dataset_config, "silence_min_duration_ms", 250.0),
+        normalization_mode=getattr(dataset_config, "normalization_mode", "none"),
+        short_audio_handling=getattr(dataset_config, "short_audio_handling", "pad"),
+        tail_window_mode=getattr(dataset_config, "tail_window_mode", "shift"),
     )
 
-    val_dataset = WhisperDataset(
-        filepaths=val_df["filepath"].tolist(),
-        labels=[class_to_idx[l] for l in val_df["label"]],
-        n_classes=len(classes),
-        model_name=params["model_name"],
-        sample_rate=params["sample_rate"],
-        frame_duration=params["frame_duration"],
-        overlap=params["overlap"],
+    from scripts.data.dataset_cache import audio_key, get_or_build
+
+    train_dataset = get_or_build(
+        audio_key(dataset_config, params, "train"),
+        lambda: WhisperDataset(
+            filepaths=train_df["filepath"].tolist(),
+            labels=[class_to_idx[l] for l in train_df["label"]],
+            **window_kwargs,
+        ),
     )
+
+    val_dataset = get_or_build(
+        audio_key(dataset_config, params, "val"),
+        lambda: WhisperDataset(
+            filepaths=val_df["filepath"].tolist(),
+            labels=[class_to_idx[l] for l in val_df["label"]],
+            **window_kwargs,
+        ),
+    )
+
+    feature_extraction_time = time.perf_counter() - start_time
 
     train_loader = DataLoader(
         train_dataset,
@@ -265,14 +325,23 @@ def run(
     resource_tracker = ResourceTracker()
     resource_tracker.start()
 
+    training_start = time.perf_counter()
     actual_epochs = 0
     for epoch in range(params["epochs"]):
         train_loss = train_epoch(model, train_loader, optimizer, device)
-        val_loss, val_preds, val_labels, _ = validate(model, val_loader, device)
-        val_acc = (val_preds == val_labels).mean()
         actual_epochs = epoch + 1
 
         history["loss"].append(train_loss)
+
+        # When early stopping is disabled the validation split is never used for
+        # model selection, so skip the per-epoch validation pass entirely and
+        # only evaluate once at the end (for reporting).
+        if not early_stopping:
+            print(f"Epoch {epoch + 1}/{params['epochs']} - train_loss: {train_loss:.4f}")
+            continue
+
+        val_loss, val_preds, val_labels, _ = validate(model, val_loader, device)
+        val_acc = (val_preds == val_labels).mean()
         history["val_loss"].append(val_loss)
         history["val_accuracy"].append(float(val_acc))
 
@@ -289,13 +358,17 @@ def run(
                 print(f"Early stopping at epoch {epoch + 1}")
                 break
 
+    training_time = time.perf_counter() - training_start
     resource_stats = resource_tracker.stop()
 
-    model.load_state_dict(torch.load(str(output_dir / "best_model.pt")))
+    if early_stopping:
+        model.load_state_dict(torch.load(str(output_dir / "best_model.pt")))
     model.eval()
 
+    eval_start = time.perf_counter()
     _, train_preds, train_labels, train_probs = validate(model, train_loader, device)
     _, val_preds, val_labels, val_probs = validate(model, val_loader, device)
+    eval_time = time.perf_counter() - eval_start
 
     train_metrics = compute_metrics(train_labels, train_preds, train_probs, classes)
     val_metrics = compute_metrics(val_labels, val_preds, val_probs, classes)
@@ -312,6 +385,14 @@ def run(
         "Encoder Frozen": freeze_encoder,
     }
 
+    total_time = time.perf_counter() - start_time
+    latency_extra = {}
+    if getattr(bench_config, "measure_latency", False):
+        try:
+            latency_extra = _measure_latency_whisper(model, val_dataset, device, params)
+        except Exception as e:
+            print(f"[WARN] Whisper latency measurement failed: {e}")
+
     metrics_path = Path(dataset_config.metrics_path or output_dir / "metrics.csv")
     save_metrics_csv(
         metrics_path,
@@ -323,10 +404,16 @@ def run(
             "Epochs": actual_epochs,
             "Max Epochs": params.get("epochs", bench_config.epochs),
             "Batch Size": params.get("batch_size", bench_config.batch_size),
-            "Train+Eval Time (s)": round(time.perf_counter() - start_time, 4),
+            "Feature Extraction Time (s)": round(feature_extraction_time, 4),
+            "Encoder Training Time (s)": round(training_time, 4),
+            "Eval Inference Time (s)": round(eval_time, 4),
+            "Total Time (s)": round(total_time, 4),
+            "Train+Eval Time (s)": round(total_time, 4),
+            "Early Stopping": early_stopping,
             "frame_duration": dataset_config.frame_duration,
             "overlap": dataset_config.overlap,
             **resource_stats,
+            **latency_extra,
         },
         complexity=complexity,
     )
@@ -341,7 +428,11 @@ def run(
         "actual_epochs": actual_epochs,
         "max_epochs": params.get("epochs", bench_config.epochs),
         "batch_size": params.get("batch_size", bench_config.batch_size),
-        "train_time_s": round(time.perf_counter() - start_time, 4),
+        "train_time_s": round(total_time, 4),
+        "feature_extraction_time_s": round(feature_extraction_time, 4),
+        "training_time_s": round(training_time, 4),
+        "eval_time_s": round(eval_time, 4),
+        "latency": latency_extra,
     }
 
 

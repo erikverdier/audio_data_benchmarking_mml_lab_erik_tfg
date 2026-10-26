@@ -38,6 +38,11 @@ class ExperimentConfig:
     name: str
     blocks: List[ExperimentBlock]
     output_dir: str = "./results"
+    # When True, prepared datasets are cached in memory and reused across the
+    # models/repeats that share them. Feature/embedding caches are released
+    # after each block; raw-audio caches are retained until the experiment
+    # ends. Defaults False so existing experiments are unaffected.
+    cache_datasets: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)

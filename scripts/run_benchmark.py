@@ -99,6 +99,12 @@ def resolve_dataset(
         "metrics_path": dataset.metrics_path,
         "pad_sequences": dataset.pad_sequences,
         "add_channel_dim": dataset.add_channel_dim,
+        "tail_window_mode": dataset.tail_window_mode,
+        "short_audio_handling": dataset.short_audio_handling,
+        "enable_silence_trimming": dataset.enable_silence_trimming,
+        "silence_threshold_db": dataset.silence_threshold_db,
+        "silence_min_duration_ms": dataset.silence_min_duration_ms,
+        "normalization_mode": dataset.normalization_mode,
     }
     _override_if_set(merged, "train_data_ids", partition.train_data_ids)
     _override_if_set(merged, "test_data_ids", partition.test_data_ids)
@@ -277,11 +283,35 @@ def _aggregate_repeated_run(
         "Train+Eval Time (s)": round(
             float(np.sum([r.get("train_time_s", 0.0) for r in run_results])), 4
         ),
+        "Total Time (s)": round(
+            float(np.sum([r.get("train_time_s", 0.0) for r in run_results])), 4
+        ),
         "frame_duration": dataset_config.frame_duration,
         "overlap": dataset_config.overlap,
         "n_runs": n_runs,
         **last.get("resource_stats", {}),
     }
+    for src_key, col in (
+        ("feature_extraction_time_s", "Feature Extraction Time (s)"),
+        ("training_time_s", "Encoder Training Time (s)"),
+        ("eval_time_s", "Eval Inference Time (s)"),
+    ):
+        values = [r.get(src_key) for r in run_results if r.get(src_key) is not None]
+        if values:
+            extra[col] = round(float(np.sum(values)), 4)
+
+    latency_keys = set()
+    for r in run_results:
+        latency_keys.update((r.get("latency") or {}).keys())
+    for key in sorted(latency_keys):
+        values = [
+            r["latency"][key]
+            for r in run_results
+            if key in (r.get("latency") or {})
+        ]
+        if values:
+            extra[key] = round(float(np.mean(values)), 4)
+
     extra.update(_std_extra("Train", std_train))
     extra.update(_std_extra("Val", std_val))
 
@@ -377,6 +407,19 @@ def _consolidate_metrics_table(
 
 def run_experiment(experiment_config_path: str | Path) -> Dict[str, Any]:
     experiment = load_experiment_config(experiment_config_path)
+
+    from scripts.data import dataset_cache
+
+    cache_datasets = bool(getattr(experiment, "cache_datasets", False))
+    dataset_cache.clear()
+    dataset_cache.set_enabled(cache_datasets)
+    if cache_datasets:
+        print(
+            "Dataset caching enabled: feature/embedding datasets are held "
+            "during a block and released afterwards; raw-audio datasets are "
+            "retained across blocks and repeats."
+        )
+
     experiment_out = ensure_dir(Path(experiment.output_dir) / experiment.name)
     environment_path = experiment_out / "environment.txt"
     log_environment_snapshot(environment_path)
@@ -471,6 +514,16 @@ def run_experiment(experiment_config_path: str | Path) -> Dict[str, Any]:
 
                 print(f"  Completed: {key}")
 
+        # Feature/embedding datasets are only used within their own block, so
+        # release them once the block is done (this is the traditional-ML case
+        # the experiment wants to keep off the heap). Raw-audio datasets are
+        # retained for the fine-tuning blocks that reuse them.
+        if cache_datasets:
+            released = dataset_cache.release_prefix("feature")
+            if released:
+                print(f"  Released {released} cached feature dataset(s).")
+        dataset_cache.collect_garbage()
+
     summary_path = Path(experiment.output_dir) / f"{experiment.name}_summary.json"
     summary = {
         "experiment": experiment.name,
@@ -487,5 +540,11 @@ def run_experiment(experiment_config_path: str | Path) -> Dict[str, Any]:
 
     outline_path = Path(experiment.output_dir) / f"{experiment.name}_full_metrics_outline.csv"
     _consolidate_metrics_table(metrics_paths, outline_path)
+
+    if cache_datasets:
+        cached = dataset_cache.clear()
+        print(f"Cleared {cached} cached dataset(s).")
+    dataset_cache.set_enabled(False)
+    dataset_cache.collect_garbage()
 
     return all_results

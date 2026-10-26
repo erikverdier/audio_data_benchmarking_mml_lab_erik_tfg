@@ -1,0 +1,9 @@
+{
+  "experiment": "vtc_vocalset_non_overlapping",
+  "results": {
+    "finetuning_frozen_clap/clap_audio/clap": {
+      "val_balanced_accuracy": 0.6097444038268434,
+      "val_accuracy": 0.6584507042253522
+    }
+  }
+}

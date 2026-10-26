@@ -51,6 +51,7 @@ def run(
     output_dir = ensure_dir(output_dir)
     start_time = time.perf_counter()
     data = load_features_data(dataset_config)
+    feature_load_time = time.perf_counter() - start_time
 
     params = bench_config.get_model_params("mlp")
     default_params = MODEL_METADATA["default_params"].copy()
@@ -60,8 +61,11 @@ def run(
     resource_tracker = ResourceTracker()
     resource_tracker.start()
 
+    fit_start = time.perf_counter()
     model = train(data, default_params)
+    fit_time = time.perf_counter() - fit_start
 
+    infer_start = time.perf_counter()
     y_train_pred = model.predict(data.X_train)
     y_val_pred = model.predict(data.X_val)
 
@@ -71,12 +75,20 @@ def run(
     except Exception:
         y_train_prob = None
         y_val_prob = None
+    infer_time = time.perf_counter() - infer_start
 
     resource_stats = resource_tracker.stop()
 
     train_metrics = compute_metrics(data.y_train, y_train_pred, y_train_prob, data.class_names)
     val_metrics = compute_metrics(data.y_val, y_val_pred, y_val_prob, data.class_names)
 
+    from scripts.evaluation.latency import measure_sklearn_model_latency
+    latency_extra = measure_sklearn_model_latency(
+        getattr(bench_config, "measure_latency", False),
+        model,
+        data.X_val,
+        dataset_config=dataset_config,
+    )
 
     metrics_path = Path(dataset_config.metrics_path or output_dir / "metrics.csv")
     elapsed = time.perf_counter() - start_time
@@ -91,11 +103,16 @@ def run(
         extra={
             "Epochs": "-",
             "Batch Size": "-",
+            "Feature Loading Time (s)": round(feature_load_time, 4),
+            "Classifier Fit Time (s)": round(fit_time, 4),
+            "Inference Time (s)": round(infer_time, 4),
             "Train+Eval Time (s)": round(elapsed, 4),
+            "Total Time (s)": round(elapsed, 4),
             "Key Parameters": f"1 hidden layer ({hidden[0]} units), lr={default_params['learning_rate_init']}, momentum={default_params['momentum']}, max {default_params['max_iter']} iters",
             "Input Features": n_features,
             "Input Feature Type": dataset_config.feature_type or dataset_config.name,
             **resource_stats,
+            **latency_extra,
         },
     )
 

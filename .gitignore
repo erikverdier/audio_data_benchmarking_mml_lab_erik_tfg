@@ -11,6 +11,8 @@ build/
 *.h5
 *.keras
 
+.representation_latency_cache.json
+
 .vscode/
 .idea/
 *.swp

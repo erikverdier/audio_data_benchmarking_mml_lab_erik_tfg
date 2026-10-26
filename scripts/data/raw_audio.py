@@ -125,6 +125,120 @@ def load_audio_file(path: str | Path, target_sr: int = 16000) -> np.ndarray:
     return audio
 
 
+def _trim_silence_smart(
+    audio: np.ndarray,
+    threshold_db: float = -40.0,
+) -> np.ndarray:
+    """Trim edge silence using librosa's trim. Ported from the
+    embedding-extraction repo so both pipelines behave identically."""
+    import librosa
+
+    rms = np.sqrt(np.mean(audio**2))
+    if rms < 1e-6:
+        return audio
+    trimmed, _ = librosa.effects.trim(audio, top_db=abs(threshold_db), ref=np.max)
+    return trimmed
+
+
+def _normalize_audio(audio: np.ndarray, mode: str = "none") -> np.ndarray:
+    if mode in (None, "none"):
+        return audio
+    if mode == "peak":
+        peak = np.max(np.abs(audio))
+        return audio / peak if peak > 0 else audio
+    if mode == "rms":
+        rms = np.sqrt(np.mean(audio**2))
+        return audio / rms if rms > 0 else audio
+    if mode == "lufs":
+        try:
+            import pyloudnorm as pyln
+            meter = pyln.Meter(48000)
+            loudness = meter.integrated_loudness(audio)
+            return pyln.normalize.loudness(audio, loudness, -23.0)
+        except Exception:
+            return audio
+    return audio
+
+
+def load_and_frame_audio(
+    audio_file: str | Path,
+    sample_rate: int = 16000,
+    frame_duration: float = 3.0,
+    overlap: float = 0.0,
+    enable_silence_trimming: bool = False,
+    silence_threshold_db: float = -40.0,
+    silence_min_duration_ms: float = 250.0,
+    normalization_mode: str = "none",
+    short_audio_handling: str = "pad",
+    tail_window_mode: str = "pad",
+) -> List[tuple]:
+    """Load an audio file and split it into fixed-length frames.
+
+    Mirrors ``load_and_frame_audio`` in the embedding-extraction repo so that
+    fine-tuning windows are directly comparable to extracted embeddings.
+
+    Returns a list of ``(frame, padded)`` tuples where ``frame`` is a float32
+    array of ``frame_duration * sample_rate`` samples and ``padded`` is True
+    for the zero-padded tail (and for short files zero-padded to a full
+    window). Returns an empty list on load error or empty audio.
+
+    ``tail_window_mode``:
+        - ``"pad"``: trailing partial window is zero-padded into one extra
+          frame (extraction behaviour).
+        - ``"shift"``: trailing partial window is covered by sliding the final
+          window back to the end of the audio (original fine-tuning
+          behaviour).
+    """
+    import librosa
+
+    try:
+        audio, sr = librosa.load(str(audio_file), sr=None, mono=True)
+        if sr != sample_rate:
+            audio = librosa.resample(audio, orig_sr=sr, target_sr=sample_rate)
+            sr = sample_rate
+    except Exception as e:
+        print(f"[WARN] Error loading {audio_file}: {e}")
+        return []
+
+    audio = np.asarray(audio, dtype=np.float32)
+
+    if enable_silence_trimming:
+        audio = _trim_silence_smart(audio, silence_threshold_db)
+
+    audio = _normalize_audio(audio, normalization_mode)
+
+    if len(audio) == 0:
+        return []
+
+    frame_len = int(sample_rate * frame_duration)
+    hop_len = max(1, int(frame_len * (1 - overlap)))
+
+    if len(audio) < frame_len:
+        if short_audio_handling == "tile":
+            repeat = int(np.ceil(frame_len / len(audio)))
+            frame = np.tile(audio, repeat)[:frame_len].astype(np.float32)
+            return [(frame, False)]
+        padded = np.zeros(frame_len, dtype=np.float32)
+        padded[: len(audio)] = audio
+        return [(padded, True)]
+
+    starts = list(range(0, len(audio) - frame_len + 1, hop_len))
+    frames = [(audio[s: s + frame_len], False) for s in starts]
+
+    if tail_window_mode == "pad":
+        covered_end = (starts[-1] + frame_len) if starts else 0
+        if covered_end < len(audio):
+            tail = np.zeros(frame_len, dtype=np.float32)
+            tail[: len(audio) - covered_end] = audio[covered_end:]
+            frames.append((tail, True))
+    elif tail_window_mode == "shift":
+        last_full_start = len(audio) - frame_len
+        if not starts or starts[-1] != last_full_start:
+            frames.append((audio[last_full_start: last_full_start + frame_len], False))
+
+    return frames
+
+
 def frame_audio(
     audio: np.ndarray,
     sample_rate: int,

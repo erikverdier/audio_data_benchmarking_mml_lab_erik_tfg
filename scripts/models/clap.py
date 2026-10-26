@@ -100,10 +100,22 @@ class ClapFinetuneDataset(Dataset):
         sample_rate: int = 48000,
         frame_duration: float = 3.0,
         overlap: float = 0.25,
+        enable_silence_trimming: bool = False,
+        silence_threshold_db: float = -40.0,
+        silence_min_duration_ms: float = 250.0,
+        normalization_mode: str = "none",
+        short_audio_handling: str = "pad",
+        tail_window_mode: str = "shift",
     ):
         self.sample_rate = sample_rate
         self.frame_duration = frame_duration
         self.overlap = overlap
+        self.enable_silence_trimming = enable_silence_trimming
+        self.silence_threshold_db = silence_threshold_db
+        self.silence_min_duration_ms = silence_min_duration_ms
+        self.normalization_mode = normalization_mode
+        self.short_audio_handling = short_audio_handling
+        self.tail_window_mode = tail_window_mode
 
         from transformers import ClapProcessor
         self.processor = ClapProcessor.from_pretrained(model_name)
@@ -114,17 +126,23 @@ class ClapFinetuneDataset(Dataset):
             self._items.extend(self._windows_for_file(filepath, label))
 
     def _windows_for_file(self, filepath: str, label: int) -> List[tuple]:
-        import librosa
+        from scripts.data.raw_audio import load_and_frame_audio
 
-        audio, _ = librosa.load(filepath, sr=self.sample_rate, mono=True)
-        audio = np.asarray(audio, dtype=np.float32)
-
-        frame_len = int(self.sample_rate * self.frame_duration)
-        hop_len = max(1, int(frame_len * (1 - self.overlap)))
-        windows = _make_windows(audio, frame_len, hop_len)
+        frames = load_and_frame_audio(
+            filepath,
+            sample_rate=self.sample_rate,
+            frame_duration=self.frame_duration,
+            overlap=self.overlap,
+            enable_silence_trimming=self.enable_silence_trimming,
+            silence_threshold_db=self.silence_threshold_db,
+            silence_min_duration_ms=self.silence_min_duration_ms,
+            normalization_mode=self.normalization_mode,
+            short_audio_handling=self.short_audio_handling,
+            tail_window_mode=self.tail_window_mode,
+        )
 
         items = []
-        for window in windows:
+        for window, _padded in frames:
             inputs = self.processor(
                 audio=[window],
                 sampling_rate=self.sample_rate,
@@ -145,6 +163,14 @@ class ClapFinetuneDataset(Dataset):
 
 def train_epoch(model, dataloader, optimizer, device):
     model.train()
+    # CLAP's audio encoder contains BatchNorm2d layers. In train() mode they
+    # normalise with batch statistics and keep updating their running
+    # statistics, so a "frozen" encoder would still drift away from the
+    # extracted embeddings. For the frozen (head-only) mode the encoder is
+    # forced back to eval() so the head trains on exactly the same features
+    # the traditional-ML block consumes.
+    if getattr(model, "keep_encoder_eval", False):
+        model.clap.eval()
     total_loss = 0
     for input_features, is_longer, labels in dataloader:
         input_features = input_features.to(device)
@@ -211,29 +237,70 @@ def _build_datasets(dataset_config, params):
     train_df = train_df[train_df["label"].isin(classes)]
     val_df = val_df[val_df["label"].isin(classes)]
 
-    train_dataset = ClapFinetuneDataset(
-        filepaths=train_df["filepath"].tolist(),
-        labels=[class_to_idx[l] for l in train_df["label"]],
+    window_kwargs = dict(
         model_name=params["model_name"],
         sample_rate=params["sample_rate"],
         frame_duration=params["frame_duration"],
         overlap=params["overlap"],
+        enable_silence_trimming=getattr(dataset_config, "enable_silence_trimming", False),
+        silence_threshold_db=getattr(dataset_config, "silence_threshold_db", -40.0),
+        silence_min_duration_ms=getattr(dataset_config, "silence_min_duration_ms", 250.0),
+        normalization_mode=getattr(dataset_config, "normalization_mode", "none"),
+        short_audio_handling=getattr(dataset_config, "short_audio_handling", "pad"),
+        tail_window_mode=getattr(dataset_config, "tail_window_mode", "shift"),
     )
 
-    val_dataset = ClapFinetuneDataset(
-        filepaths=val_df["filepath"].tolist(),
-        labels=[class_to_idx[l] for l in val_df["label"]],
-        model_name=params["model_name"],
-        sample_rate=params["sample_rate"],
-        frame_duration=params["frame_duration"],
-        overlap=params["overlap"],
+    from scripts.data.dataset_cache import audio_key, get_or_build
+
+    train_dataset = get_or_build(
+        audio_key(dataset_config, params, "train"),
+        lambda: ClapFinetuneDataset(
+            filepaths=train_df["filepath"].tolist(),
+            labels=[class_to_idx[l] for l in train_df["label"]],
+            **window_kwargs,
+        ),
+    )
+
+    val_dataset = get_or_build(
+        audio_key(dataset_config, params, "val"),
+        lambda: ClapFinetuneDataset(
+            filepaths=val_df["filepath"].tolist(),
+            labels=[class_to_idx[l] for l in val_df["label"]],
+            **window_kwargs,
+        ),
     )
 
     return train_dataset, val_dataset, classes
 
 
+def _measure_latency_clap(model, val_dataset, device, params) -> Dict[str, float]:
+    """Times encoder, classifier, and end-to-end forward at batch 1 and the
+    training batch size, returning per-window latency columns."""
+    import torch
+    from scripts.evaluation.latency import measure_clap_components, to_latency_columns
+
+    n = len(val_dataset)
+    if n == 0:
+        return {}
+
+    batch_sizes = []
+    for bs in (1, params.get("batch_size", 1)):
+        if bs and bs not in batch_sizes:
+            batch_sizes.append(int(bs))
+
+    columns: Dict[str, float] = {}
+    for bs in batch_sizes:
+        k = min(bs, n)
+        feats = torch.stack([val_dataset[i][0] for i in range(k)]).to(device)
+        is_longer = torch.stack([val_dataset[i][1] for i in range(k)]).to(device)
+        stats = measure_clap_components(model, feats, is_longer, device)
+        for key, value in to_latency_columns(stats, k).items():
+            columns[f"{key} (bs={bs})"] = value
+    return columns
+
+
 def _run_clap(
-    dataset_config, bench_config, output_dir, device, params, freeze_encoder: bool
+    dataset_config, bench_config, output_dir, device, params, freeze_encoder
 ) -> Dict[str, Any]:
     """Shared training loop for both frozen (head_only) and full fine-tuning.
 
@@ -243,10 +310,13 @@ def _run_clap(
     frozen too).
     """
     start_time = time.perf_counter()
+    early_stopping = params.get("early_stopping", True)
 
     train_dataset, val_dataset, classes = _build_datasets(
         dataset_config, params
     )
+
+    feature_extraction_time = time.perf_counter() - start_time
 
     train_loader = DataLoader(
         train_dataset,
@@ -283,6 +353,9 @@ def _run_clap(
             param.requires_grad = False
         for param in model.classifier.parameters():
             param.requires_grad = True
+        # Keep the encoder in eval() mode so its BatchNorm running statistics
+        # are not updated and the features match the extracted embeddings.
+        model.keep_encoder_eval = True
 
         optimizer = torch.optim.Adam(
             model.classifier.parameters(),
@@ -316,14 +389,23 @@ def _run_clap(
     resource_tracker = ResourceTracker()
     resource_tracker.start()
 
+    training_start = time.perf_counter()
     actual_epochs = 0
     for epoch in range(params["epochs"]):
         train_loss = train_epoch(model, train_loader, optimizer, device)
-        val_loss, val_preds, val_labels, _ = validate(model, val_loader, device)
-        val_acc = (val_preds == val_labels).mean()
         actual_epochs = epoch + 1
 
         history["loss"].append(train_loss)
+
+        # When early stopping is disabled the validation split is never used for
+        # model selection, so skip the per-epoch validation pass entirely and
+        # only evaluate once at the end (for reporting).
+        if not early_stopping:
+            print(f"Epoch {epoch + 1}/{params['epochs']} - train_loss: {train_loss:.4f}")
+            continue
+
+        val_loss, val_preds, val_labels, _ = validate(model, val_loader, device)
+        val_acc = (val_preds == val_labels).mean()
         history["val_loss"].append(val_loss)
         history["val_accuracy"].append(float(val_acc))
 
@@ -340,13 +422,17 @@ def _run_clap(
                 print(f"Early stopping at epoch {epoch + 1}")
                 break
 
+    training_time = time.perf_counter() - training_start
     resource_stats = resource_tracker.stop()
 
-    model.load_state_dict(torch.load(str(output_dir / "best_model.pt")))
+    if early_stopping:
+        model.load_state_dict(torch.load(str(output_dir / "best_model.pt")))
     model.eval()
 
+    eval_start = time.perf_counter()
     _, train_preds, train_labels, train_probs = validate(model, train_loader, device)
     _, val_preds, val_labels, val_probs = validate(model, val_loader, device)
+    eval_time = time.perf_counter() - eval_start
 
     train_metrics = compute_metrics(train_labels, train_preds, train_probs, classes)
     val_metrics = compute_metrics(val_labels, val_preds, val_probs, classes)
@@ -365,6 +451,14 @@ def _run_clap(
 
     model_name = "clap_head_only" if freeze_encoder else "clap_full"
 
+    total_time = time.perf_counter() - start_time
+    latency_extra = {}
+    if getattr(bench_config, "measure_latency", False):
+        try:
+            latency_extra = _measure_latency_clap(model, val_dataset, device, params)
+        except Exception as e:
+            print(f"[WARN] CLAP latency measurement failed: {e}")
+
     metrics_path = Path(dataset_config.metrics_path or output_dir / "metrics.csv")
     save_metrics_csv(
         metrics_path,
@@ -376,10 +470,16 @@ def _run_clap(
             "Epochs": actual_epochs,
             "Max Epochs": params.get("epochs", bench_config.epochs),
             "Batch Size": params.get("batch_size", bench_config.batch_size),
-            "Train+Eval Time (s)": round(time.perf_counter() - start_time, 4),
+            "Feature Extraction Time (s)": round(feature_extraction_time, 4),
+            "Encoder Training Time (s)": round(training_time, 4),
+            "Eval Inference Time (s)": round(eval_time, 4),
+            "Total Time (s)": round(total_time, 4),
+            "Train+Eval Time (s)": round(total_time, 4),
+            "Early Stopping": early_stopping,
             "frame_duration": dataset_config.frame_duration,
             "overlap": dataset_config.overlap,
             **resource_stats,
+            **latency_extra,
         },
         complexity=complexity,
     )
@@ -394,7 +494,11 @@ def _run_clap(
         "actual_epochs": actual_epochs,
         "max_epochs": params.get("epochs", bench_config.epochs),
         "batch_size": params.get("batch_size", bench_config.batch_size),
-        "train_time_s": round(time.perf_counter() - start_time, 4),
+        "train_time_s": round(total_time, 4),
+        "feature_extraction_time_s": round(feature_extraction_time, 4),
+        "training_time_s": round(training_time, 4),
+        "eval_time_s": round(eval_time, 4),
+        "latency": latency_extra,
     }
 
 

@@ -1,0 +1,21 @@
+{
+  "experiment": "vtc_vocalset_non_overlapping",
+  "results": {
+    "finetuning_frozen_clap/clap_audio/clap": {
+      "val_balanced_accuracy": 0.25248381649186785,
+      "val_accuracy": 0.4097450424929178
+    },
+    "finetuning_frozen_whisper/whisper_audio/whisper": {
+      "val_balanced_accuracy": 0.593835803060929,
+      "val_accuracy": 0.6440226628895184
+    },
+    "full_finetuning_clap/clap_audio/clap": {
+      "val_balanced_accuracy": 0.7204905743073209,
+      "val_accuracy": 0.7141076487252125
+    },
+    "full_finetuning_whisper/whisper_audio/whisper": {
+      "val_balanced_accuracy": 0.693879218885738,
+      "val_accuracy": 0.6792067988668554
+    }
+  }
+}

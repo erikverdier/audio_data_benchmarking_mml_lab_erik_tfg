@@ -19,7 +19,15 @@ include_labels:
   - spoken
   - trill
   - trillo
-  - vocal_fry
+  - vocal_fry-2}} &\makecell[c]{\textbf{Eval.}\\ \textbf{Top-3}} &  \makecell[c]{\textbf{Classifier Fit} \\ \textbf{Time (s)}} & \makecell[c]{\textbf{Inference} \\ \textbf{Time (s)}} & \makecell[c]{\textbf{Inference Latency}\\ \textbf{(ms/window)}} & \makecell[c]{\textbf{Peak RSS}\\ \textbf{(GB)}} & \makecell[c]{\textbf{Peak GPU}\\ \textbf{Mem. (GB)}} \\
+\hline
+￼
+1DCNN \cite{vocalSet} & 0.488 & 0.584 & 0.484 & 0.764 & 0.863 & - & - & - & - & - \\
+Oblong-CNN \cite{OblongCNN} & 0.574 & 0.613 & 0.589 & 0.798 & 0.871 & - & - & - & - & - \\
+Wav2Vec2.0 \cite{Yamamoto2023} & 0.561 & 0.583 & 0.601 & 0.748 & 0.821 & - & - & - & - & - \\
+WavLM \cite{Yamamoto2023} & 0.556 & 0.608 & 0.579 & 0.753 & 0.838 & - & - & - & - & - \\
+MERT \cite{Yamamoto2023}& 0.541 & 0.585 & 0.585 & 0.761 & 0.853 & - & - & - & - & - \\
+MapMusic2Vec \cite{Yamamoto2023}& 0.608 & 0.660 & 0.621 & 0.790 & 0.869 & - & - & - & - & - \\
 ---
 # New-style Parquet files
 name: vocalset_vggish_parquet

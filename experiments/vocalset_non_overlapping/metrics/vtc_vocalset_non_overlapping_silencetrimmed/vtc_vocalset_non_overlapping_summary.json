@@ -1,0 +1,117 @@
+{
+  "experiment": "vtc_vocalset_non_overlapping",
+  "results": {
+    "trad_ml/opensmile/knn": {
+      "val_balanced_accuracy": 0.1460576257317986,
+      "val_accuracy": 0.19449326303456357
+    },
+    "trad_ml/opensmile/rf": {
+      "val_balanced_accuracy": 0.6215003258454905,
+      "val_accuracy": 0.687170474516696
+    },
+    "trad_ml/opensmile/mlp": {
+      "val_balanced_accuracy": 0.5588503241190763,
+      "val_accuracy": 0.6449912126537786
+    },
+    "trad_ml/opensmile/svm": {
+      "val_balanced_accuracy": 0.6497132187877084,
+      "val_accuracy": 0.6988869361452841
+    },
+    "trad_ml/vggish/knn": {
+      "val_balanced_accuracy": 0.4823384947909891,
+      "val_accuracy": 0.5014645577035736
+    },
+    "trad_ml/vggish/rf": {
+      "val_balanced_accuracy": 0.48924095111515487,
+      "val_accuracy": 0.5518453427065027
+    },
+    "trad_ml/vggish/mlp": {
+      "val_balanced_accuracy": 0.5436241097629726,
+      "val_accuracy": 0.5705916813122437
+    },
+    "trad_ml/vggish/svm": {
+      "val_balanced_accuracy": 0.5410335040994412,
+      "val_accuracy": 0.5846514352665495
+    },
+    "trad_ml/whisper/knn": {
+      "val_balanced_accuracy": 0.5623893317235347,
+      "val_accuracy": 0.5694200351493849
+    },
+    "trad_ml/whisper/rf": {
+      "val_balanced_accuracy": 0.5911403014055421,
+      "val_accuracy": 0.6508494434680726
+    },
+    "trad_ml/whisper/mlp": {
+      "val_balanced_accuracy": 0.6423446956021361,
+      "val_accuracy": 0.6479203280609256
+    },
+    "trad_ml/whisper/svm": {
+      "val_balanced_accuracy": 0.6482314171347004,
+      "val_accuracy": 0.6865846514352666
+    },
+    "trad_ml/clap/knn": {
+      "val_balanced_accuracy": 0.6008388769857644,
+      "val_accuracy": 0.6220657276995305
+    },
+    "trad_ml/clap/rf": {
+      "val_balanced_accuracy": 0.5995035250576561,
+      "val_accuracy": 0.6584507042253521
+    },
+    "trad_ml/clap/mlp": {
+      "val_balanced_accuracy": 0.6592328266024723,
+      "val_accuracy": 0.6643192488262911
+    },
+    "trad_ml/clap/svm": {
+      "val_balanced_accuracy": 0.6451633887569933,
+      "val_accuracy": 0.6836854460093896
+    },
+    "trad_ml/ms_clap/knn": {
+      "val_balanced_accuracy": 0.6295663295616982,
+      "val_accuracy": 0.648506151142355
+    },
+    "trad_ml/ms_clap/rf": {
+      "val_balanced_accuracy": 0.634820997038618,
+      "val_accuracy": 0.6748681898066784
+    },
+    "trad_ml/ms_clap/mlp": {
+      "val_balanced_accuracy": 0.668878338309044,
+      "val_accuracy": 0.6508494434680726
+    },
+    "trad_ml/ms_clap/svm": {
+      "val_balanced_accuracy": 0.6857968308898705,
+      "val_accuracy": 0.7088459285295841
+    },
+    "trad_ml/mfcc/knn": {
+      "val_balanced_accuracy": 0.2977692992615031,
+      "val_accuracy": 0.35735207967193905
+    },
+    "trad_ml/mfcc/rf": {
+      "val_balanced_accuracy": 0.294092012673259,
+      "val_accuracy": 0.4030462800234329
+    },
+    "trad_ml/mfcc/mlp": {
+      "val_balanced_accuracy": 0.2721322018395256,
+      "val_accuracy": 0.380199179847686
+    },
+    "trad_ml/mfcc/svm": {
+      "val_balanced_accuracy": 0.2863257825546455,
+      "val_accuracy": 0.39132981839484476
+    },
+    "finetuning_frozen_clap/clap_audio/clap": {
+      "val_balanced_accuracy": 0.6097444038268434,
+      "val_accuracy": 0.6584507042253522
+    },
+    "finetuning_frozen_whisper/whisper_audio/whisper": {
+      "val_balanced_accuracy": 0.6205184150491923,
+      "val_accuracy": 0.6630931458699473
+    },
+    "full_finetuning_clap/clap_audio/clap": {
+      "val_balanced_accuracy": 0.7216766790959945,
+      "val_accuracy": 0.7190727699530516
+    },
+    "full_finetuning_whisper/whisper_audio/whisper": {
+      "val_balanced_accuracy": 0.7120573346060192,
+      "val_accuracy": 0.7114235500878735
+    }
+  }
+}

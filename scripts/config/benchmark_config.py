@@ -25,6 +25,10 @@ class BenchmarkConfig:
     train_split: float = 1.0
     val_split: float = 1.0
 
+    # When True the model's inference latency is measured and reported.
+    # Defaults False so existing experiments are unaffected.
+    measure_latency: bool = False
+
     def to_dict(self) -> dict:
         return asdict(self)
 

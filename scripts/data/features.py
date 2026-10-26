@@ -190,6 +190,14 @@ def _resolve_data_paths(config: DatasetConfig) -> Tuple[Optional[str], Optional[
 
 
 def load_features_data(config: DatasetConfig) -> FeaturesData:
+    from scripts.data.dataset_cache import feature_key, get_or_build
+
+    return get_or_build(
+        feature_key(config), lambda: _load_features_data_impl(config)
+    )
+
+
+def _load_features_data_impl(config: DatasetConfig) -> FeaturesData:
     train_path, val_path = _resolve_data_paths(config)
 
     if not train_path:
