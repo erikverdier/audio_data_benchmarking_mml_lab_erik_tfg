@@ -14,15 +14,21 @@ CSV_PATH = "/home/suvihaara/Documents/PhD/CODE/audio_data_benchmarking_mml_lab/e
 TRAD_ML_LATENCY_CSV = Path(CSV_PATH).parent / "trad_ml_latency.csv"
 
 COST_COLUMN = "End To End Latency (ms/window) (bs=1)"
-PERFORMANCE_COLUMN = "Val Balanced Accuracy"
+ # Reported numbers are on the evaluation (held-out) split. No hyperparameters,
+# learning rates, or epochs were selected using this split.
+PERFORMANCE_COLUMN = "Val Balanced Accuracy"  # corresponds to evaluation split in this benchmark
 
 OUTPUT_BACC = "supplementary_heatmaps_bacc.pdf"
 OUTPUT_F1 = "supplementary_heatmaps_f1.pdf"
 OUTPUT_COST = "supplementary_cost_vs_performance.pdf"
+OUTPUT_COMPACT_BACC = "supplementary_heatmap_compact_bacc.pdf"
+OUTPUT_COMPACT_F1 = "supplementary_heatmap_compact_f1.pdf"
 
 OUTPUT_BACC_PNG = "supplementary_heatmaps_bacc.png"
 OUTPUT_F1_PNG = "supplementary_heatmaps_f1.png"
 OUTPUT_COST_PNG = "supplementary_cost_vs_performance.png"
+OUTPUT_COMPACT_BACC_PNG = "supplementary_heatmap_compact_bacc.png"
+OUTPUT_COMPACT_F1_PNG = "supplementary_heatmap_compact_f1.png"
 
 
 # Ordering
@@ -259,6 +265,12 @@ def make_finetuning_matrix(metric):
 def make_figure(metric, output_pdf, output_png):
 
     traditional_matrix = make_traditional_matrix(metric)
+    # Add means the same way as the compact version
+    traditional_matrix = traditional_matrix.transpose()
+    traditional_matrix.loc["Mean"] = traditional_matrix.mean(axis=0)
+    traditional_matrix["Mean"] = traditional_matrix.mean(axis=1)
+    traditional_matrix = traditional_matrix.transpose()
+
     finetuning_matrix = make_finetuning_matrix(metric)
 
     # --------------------------------------------------------
@@ -276,6 +288,7 @@ def make_figure(metric, output_pdf, output_png):
     # Panel (a): Classifier × representation
     # --------------------------------------------------------
 
+    n_rows_a, n_cols_a = traditional_matrix.shape
     sns.heatmap(
         traditional_matrix,
         annot=True,
@@ -292,6 +305,10 @@ def make_figure(metric, output_pdf, output_png):
         ax=axes[0],
     )
 
+    # Separate the marginal means from the per-configuration cells
+    axes[0].axhline(n_rows_a - 1, color="black", linewidth=1.0)
+    axes[0].axvline(n_cols_a - 1, color="black", linewidth=1.0)
+
     axes[0].set_xlabel("Representation", fontsize=9)
     axes[0].set_ylabel("Classifier", fontsize=9)
 
@@ -306,6 +323,9 @@ def make_figure(metric, output_pdf, output_png):
         labelrotation=0,
         labelsize=8,
     )
+
+    axes[0].get_xticklabels()[-1].set_fontweight("bold")
+    axes[0].get_yticklabels()[-1].set_fontweight("bold")
 
     axes[0].set_title(
         "(a) Classifier × Representation",
@@ -380,8 +400,13 @@ def make_figure(metric, output_pdf, output_png):
         pad=0.03,
     )
 
+    cbar_label = metric
+    if metric.startswith("Val "):
+        cbar_label = metric.replace("Val ", "Eval ")
+    else:
+        cbar_label = metric.replace("Validation", "Evaluation")
     cbar.set_label(
-        metric,
+        cbar_label,
         fontsize=8,
     )
 
@@ -395,7 +420,7 @@ def make_figure(metric, output_pdf, output_png):
 
     fig.subplots_adjust(
         left=0.08,
-        right=0.80,  
+        right=0.80,
         bottom=0.20,
         top=0.84,
         wspace=0.4,
@@ -422,12 +447,80 @@ def make_figure(metric, output_pdf, output_png):
 
 
 # ============================================================
-# Cost vs performance (all models on one end-to-end latency axis)
+# Compact representation x classifier heatmap (with row/column means)
+# ============================================================
+
+
+def make_compact_matrix(metric):
+    """Representation x classifier matrix with marginal means.
+
+    Rows are representations (plus a mean-of-representations row), columns
+    are classifiers (plus a mean-of-classifiers column).
+    """
+
+    matrix = make_traditional_matrix(metric).transpose()
+    matrix.loc["Mean"] = matrix.mean(axis=0)
+    matrix["Mean"] = matrix.mean(axis=1)
+    return matrix
+
+
+def make_compact_figure(metric, output_pdf, output_png):
+    matrix = make_compact_matrix(metric)
+
+    n_rows, n_cols = matrix.shape
+
+    fig, ax = plt.subplots(figsize=(5.4, 4.1))
+
+    sns.heatmap(
+        matrix,
+        annot=True,
+        fmt=".3f",
+        cmap="coolwarm",
+        vmin=0,
+        vmax=1,
+        linewidths=0.5,
+        linecolor="white",
+        annot_kws={"fontsize": 7},
+        cbar_kws={
+            "label": metric,
+            "fraction": 0.046,
+            "pad": 0.03,
+        },
+        ax=ax,
+    )
+
+    # Separate the marginal means from the per-configuration cells
+    ax.axhline(n_rows - 1, color="black", linewidth=1.0)
+    ax.axvline(n_cols - 1, color="black", linewidth=1.0)
+
+    ax.set_xlabel("Classifier", fontsize=9)
+    ax.set_ylabel("Representation", fontsize=9)
+
+    ax.tick_params(axis="x", labelrotation=0, labelsize=8)
+    ax.tick_params(axis="y", labelrotation=0, labelsize=8)
+
+    ax.get_xticklabels()[-1].set_fontweight("bold")
+    ax.get_yticklabels()[-1].set_fontweight("bold")
+
+    ax.set_title(metric.replace("Val ", "Eval ") + " (held-out)", fontsize=9, pad=8)
+
+    fig.tight_layout()
+
+    fig.savefig(output_pdf, bbox_inches="tight")
+    fig.savefig(output_png, dpi=600, bbox_inches="tight")
+
+    plt.show()
+
+    plt.close(fig)
+
+
+# ============================================================
+# Cost vs performance (all models on one measured inference latency axis)
 # ============================================================
 
 
 def make_cost_performance_figure(output_pdf, output_png):
-    """Single scatter: end-to-end latency vs balanced accuracy, all models."""
+    """Single scatter: measured inference latency vs balanced accuracy, all models."""
 
     scatter = df[
         df[COST_COLUMN].notna() & df[PERFORMANCE_COLUMN].notna()
@@ -444,7 +537,7 @@ def make_cost_performance_figure(output_pdf, output_png):
     palette = dict(
         zip(
             REPRESENTATION_ORDER,
-            sns.color_palette("viridis", n_colors=len(REPRESENTATION_ORDER)),
+            sns.color_palette("magma", n_colors=len(REPRESENTATION_ORDER)),
         )
     )
 
@@ -502,14 +595,14 @@ def make_cost_performance_figure(output_pdf, output_png):
 
     ax.set_xscale("log")
     ax.set_xlabel(
-        "End-to-end latency (ms/window, batch size 1, log scale)",
+        "Measured Inference Latency (ms/window, batch size 1, log scale)",
         fontsize=9,
     )
-    ax.set_ylabel("Validation balanced accuracy", fontsize=9)
+    ax.set_ylabel("Evaluation balanced accuracy (held-out)", fontsize=9)
     ax.set_ylim(0, 0.8)
     ax.tick_params(labelsize=8)
     ax.grid(True, which="both", linewidth=0.3, alpha=0.3)
-    ax.set_title("End-to-End Latency vs Performance", fontsize=10, pad=8)
+    ax.set_title("Measured Inference Latency vs Evaluation Performance (held-out split)", fontsize=10, pad=8)
 
     # Legend (two rows below the axes)
     handles = [
@@ -585,19 +678,31 @@ def make_cost_performance_figure(output_pdf, output_png):
 # Generate figures
 # ============================================================
 
-# make_figure(
-#     metric="Val Balanced Accuracy",
-#     output_pdf=OUTPUT_BACC,
-#     output_png=OUTPUT_BACC_PNG,
-# )
+make_figure(
+    metric="Val Balanced Accuracy",
+    output_pdf=OUTPUT_BACC,
+    output_png=OUTPUT_BACC_PNG,
+)
 
-# make_figure(
-#     metric="Val F1",
-#     output_pdf=OUTPUT_F1,
-#     output_png=OUTPUT_F1_PNG,
-# )
+make_figure(
+    metric="Val F1",
+    output_pdf=OUTPUT_F1,
+    output_png=OUTPUT_F1_PNG,
+)
 
 make_cost_performance_figure(
     output_pdf=OUTPUT_COST,
     output_png=OUTPUT_COST_PNG,
 )
+
+# make_compact_figure(
+#     metric="Val Balanced Accuracy",
+#     output_pdf=OUTPUT_COMPACT_BACC,
+#     output_png=OUTPUT_COMPACT_BACC_PNG,
+# )
+
+# make_compact_figure(
+#     metric="Val F1",
+#     output_pdf=OUTPUT_COMPACT_F1,
+#     output_png=OUTPUT_COMPACT_F1_PNG,
+# )

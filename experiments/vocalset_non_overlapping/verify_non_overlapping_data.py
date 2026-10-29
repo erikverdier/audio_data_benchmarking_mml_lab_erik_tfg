@@ -33,13 +33,30 @@ from experiments.vocalset_non_overlapping.vocalset_non_overlapping_experiments_c
     EMBEDDINGS_DATA_DIR,
 )
 
-EXPECTED = {
-    "total": 12350,
-    "padded": 3613,
-    "filtered": 6675,
-    "train": 4910,
-    "val": 1765,
+EXPECTED_BY_EXTRACTOR = {
+    "laion-clap": {
+        "total": 11664,
+        "padded": 3610,
+        "filtered": 6371,
+        "train": 4667,
+        "val": 1704,
+    },
 }
+EXPECTED_DEFAULT = {
+    "total": 11697,
+    "padded": 3611,
+    "filtered": 6378,
+    "train": 4671,
+    "val": 1707,
+}
+
+
+def _expected_for(path: Path) -> dict[str, int]:
+    for extractor, expected in EXPECTED_BY_EXTRACTOR.items():
+        if extractor in path.stem:
+            return expected
+    return EXPECTED_DEFAULT
+
 
 # Sample rate used by the extraction pipeline when framing each extractor.
 EXTRACTOR_SAMPLE_RATE = {
@@ -76,12 +93,13 @@ def check_counts(parquet_dir: Path) -> bool:
             "train": len(train),
             "val": len(val),
         }
-        conds = {k: actual[k] == EXPECTED[k] for k in EXPECTED}
+        expected = _expected_for(path)
+        conds = {k: actual[k] == expected[k] for k in expected}
         all_ok &= all(conds.values())
         status = "PASS" if all(conds.values()) else "FAIL"
         detail = ", ".join(
-            f"{k}={actual[k]}" + ("" if conds[k] else f"(exp {EXPECTED[k]})")
-            for k in EXPECTED
+            f"{k}={actual[k]}" + ("" if conds[k] else f"(exp {expected[k]})")
+            for k in expected
         )
         print(f"  [{status}] {path.name}: {detail}")
     return all_ok
@@ -118,7 +136,8 @@ def check_framing(parquet_dir: Path, n_files: int, full: bool) -> bool:
             sample_rate=DEFAULT_SAMPLE_RATE,
             frame_duration=3.0,
             overlap=0.0,
-            enable_silence_trimming=False,
+            enable_silence_trimming=True,
+            silence_threshold_db=-40.0,
             normalization_mode="none",
             short_audio_handling="pad",
             tail_window_mode="pad",
@@ -170,7 +189,8 @@ def check_mfcc(parquet_dir: Path, n_frames: int) -> bool:
             sample_rate=DEFAULT_SAMPLE_RATE,
             frame_duration=3.0,
             overlap=0.0,
-            enable_silence_trimming=False,
+            enable_silence_trimming=True,
+            silence_threshold_db=-40.0,
             normalization_mode="none",
             short_audio_handling="pad",
             tail_window_mode="pad",
