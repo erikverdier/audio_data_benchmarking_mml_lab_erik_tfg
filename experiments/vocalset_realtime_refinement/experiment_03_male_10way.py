@@ -10,9 +10,7 @@ from configs.benchmarking_500ms_50overlap.my_dataset_config import opensmile
 from configs.benchmarking_500ms_50overlap.my_benchmark_config import trad_ml
 
 
-# ---------------------------------------------------------------------------
-# VocalSet 10-technique classification
-# ---------------------------------------------------------------------------
+# 10/17 techniques
 
 VOCALSET_10 = [
     "vibrato",
@@ -28,18 +26,15 @@ VOCALSET_10 = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# Singer-independent train/test partition
-# ---------------------------------------------------------------------------
+# Singer-independent train-test partition
 
 TRAIN_SINGERS = [
-    "female1", "female3", "female4", "female5", "female6",
-    "female7", "female9", "male1", "male11", "male2", "male4",
+    "male1", "male11", "male2", "male4",
     "male6", "male7", "male8", "male9",
 ]
 
 TEST_SINGERS = [
-    "female2", "female8", "male3", "male5", "male10",
+    "male3", "male5", "male10",
 ]
 
 partition = PartitionConfig(
@@ -50,12 +45,10 @@ partition = PartitionConfig(
 )
 
 
-# ---------------------------------------------------------------------------
-# Experiment 01: mixed gender, 10 techniques
-# ---------------------------------------------------------------------------
+# Experiment 03: male-only, 10 techniques
 
-experiment_01_mixed_10way = ExperimentConfig(
-    name="experiment_01_mixed_10way",
+experiment_03_male_10way = ExperimentConfig(
+    name="experiment_03_male_10way",
     output_dir=(
         "/Users/erikverdiermontero/Downloads/"
         "TFG_benchmarking/results"
@@ -69,7 +62,7 @@ experiment_01_mixed_10way = ExperimentConfig(
             frame_duration=0.5,
             overlap=0.5,
             filters=ExperimentFilters(
-                gender="mixed",
+                gender="male",             # Only male
                 include_labels=VOCALSET_10,
             ),
         ),

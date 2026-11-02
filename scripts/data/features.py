@@ -204,10 +204,14 @@ def load_features_data(config: DatasetConfig) -> FeaturesData:
         if val_path and _is_parquet(val_path):
             train_df = _load_parquet(train_path)
             val_df = _load_parquet(val_path)
+
+
         else:
             df = _load_parquet(train_path)
             df = _add_data_column_label(df, config)
             train_df, val_df = _split_by_singer(df, config)
+
+
 
         # Apply label filtering BEFORE extracting embeddings
         train_df = _apply_label_filter(train_df, config)

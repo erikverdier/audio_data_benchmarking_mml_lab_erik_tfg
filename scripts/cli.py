@@ -75,8 +75,8 @@ def _run_command(args):
     elif args.dataset_config and args.benchmark_config:
         from scripts.run_benchmark import run_benchmark
         run_benchmark(
-            dataset_config_path=args.dataset_config,
-            benchmark_config_path=args.benchmark_config,
+            dataset_config=args.dataset_config,   # MODIFIED: changed from args.dataset_config to args.dataset_config
+            benchmark_config=args.benchmark_config, # MODIFIED: changed from args.benchmark_config to args.benchmark_config
         )
     else:
         print("Error: specify --feature-selection-experiment, --experiment, OR --dataset-config + --benchmark-config")
